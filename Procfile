@@ -1,1 +1,1 @@
-web: gunicorn app:app
+web: gunicorn 座席予約システム:app
