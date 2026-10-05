@@ -706,9 +706,8 @@ HTML_BUY = """
         async function executePurchase() {
             if (!pendingPurchaseData) return;
 
-            const endpoint = (pendingPurchaseData.mode === 'reserved') ? '/api/buy_reserved' : '/api/buy_unreserved';
-            
-            const res = await fetch(endpoint, {
+            // 自由席も指定席も同じ /api/buy_reserved エンドポイントに統一！
+            const res = await fetch('/api/buy_reserved', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(pendingPurchaseData)
@@ -914,9 +913,9 @@ def api_buy_reserved():
     email = data.get('email')
     pay_method = data.get('payMethod')
     member_id = data.get('memberId', '')
-    seat_numbers = data.get('seat_numbers', [])
+    mode = data.get('mode', 'reserved')
     
-    if not name or not email or not seat_numbers:
+    if not name or not email:
         return jsonify({'success': False, 'message': '入力内容が不足しています。'})
         
     if not is_katakana(name):
@@ -928,16 +927,38 @@ def api_buy_reserved():
     conn = get_db_connection()
     c = conn.cursor()
     
-    # 選択された座席が空いているか確認
-    for s_num in seat_numbers:
+    target_seats = []
+    
+    if mode == 'reserved':
+        seat_numbers = data.get('seat_numbers', [])
+        if not seat_numbers:
+            return jsonify({'success': False, 'message': '指定席が選択されていません。'})
+            
+        # 選択された指定席が空いているか確認
+        for s_num in seat_numbers:
+            if DATABASE_URL:
+                c.execute('SELECT status FROM seats WHERE performance_time = %s AND seat_number = %s', (perf, s_num))
+            else:
+                c.execute('SELECT status FROM seats WHERE performance_time = ? AND seat_number = ?', (perf, s_num))
+            row = c.fetchone()
+            if not row or row[0] != 'available':
+                conn.close()
+                return jsonify({'success': False, 'message': f'座席 {s_num} はすでに埋まっています。'})
+        target_seats = seat_numbers
+    else:
+        # 自由席の場合：指定された枚数分だけ、空いている自由席を自動で確保する
+        qty = int(data.get('qty', 1))
         if DATABASE_URL:
-            c.execute('SELECT status FROM seats WHERE performance_time = %s AND seat_number = %s', (perf, s_num))
+            c.execute('SELECT seat_number FROM seats WHERE performance_time = %s AND seat_type = %s AND status = %s LIMIT %s', (perf, 'unreserved', 'available', qty))
         else:
-            c.execute('SELECT status FROM seats WHERE performance_time = ? AND seat_number = ?', (perf, s_num))
-        row = c.fetchone()
-        if not row or row[0] != 'available':
+            c.execute('SELECT seat_number FROM seats WHERE performance_time = ? AND seat_type = ? AND status = ? LIMIT ?', (perf, 'unreserved', 'available', qty))
+        rows = c.fetchall()
+        
+        if len(rows) < qty:
             conn.close()
-            return jsonify({'success': False, 'message': f'座席 {s_num} はすでに埋まっています。'})
+            return jsonify({'success': False, 'message': '申し訳ありません。ご希望の枚数の自由席が残っていません。'})
+            
+        target_seats = [r[0] for r in rows]
             
     booking_code = generate_booking_code()
     
@@ -945,7 +966,7 @@ def api_buy_reserved():
         # 身内販売は即確定
         status = 'sold'
         expires_at = None
-        for s_num in seat_numbers:
+        for s_num in target_seats:
             if DATABASE_URL:
                 c.execute('''UPDATE seats SET status = %s, purchased_by = %s, email = %s, booking_code = %s, payment_method = %s, member_id = %s, expires_at = %s 
                             WHERE performance_time = %s AND seat_number = %s''',
@@ -958,8 +979,8 @@ def api_buy_reserved():
         conn.close()
         
         # メール送信
-        seat_str = ", ".join(seat_numbers)
-        total_price = (TICKET_PRICE * len(seat_numbers))
+        seat_str = ", ".join(target_seats)
+        total_price = (TICKET_PRICE * len(target_seats))
         send_confirmation_email(email, name, booking_code, perf, seat_str, total_price)
         
         return jsonify({'success': True, 'booking_code': booking_code})
@@ -971,7 +992,7 @@ def api_buy_reserved():
         else:
             expires_at = (datetime.now() + timedelta(minutes=15)).strftime('%Y-%m-%d %H:%M:%S')
 
-        for s_num in seat_numbers:
+        for s_num in target_seats:
             if DATABASE_URL:
                 c.execute('''UPDATE seats SET status = %s, purchased_by = %s, email = %s, booking_code = %s, payment_method = %s, member_id = %s, expires_at = %s 
                             WHERE performance_time = %s AND seat_number = %s''',
@@ -985,7 +1006,7 @@ def api_buy_reserved():
         
         # Stripe Checkoutセッション作成
         try:
-            qty = len(seat_numbers)
+            qty = len(target_seats)
             unit_price = TICKET_PRICE + FEE_CONFIG.get(pay_method, 0)
             
             # ホストURLの取得
@@ -995,7 +1016,7 @@ def api_buy_reserved():
                 line_items=[{
                     'price_data': {
                         'currency': 'jpy',
-                        'product_data': {'name': f'【虹凛プロジェクト】チケット ({", ".join(seat_numbers)})'},
+                        'product_data': {'name': f'【虹凛プロジェクト】チケット ({", ".join(target_seats)})'},
                         'unit_amount': unit_price,
                     },
                     'quantity': qty,
