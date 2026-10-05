@@ -220,3 +220,29 @@ HTML_BUY = """...""" # （※文字数節約のため、中身は以前のまま
 HTML_ADMIN = """..."""
 
 # （※HTML部分は省略せず、お手元のコードのHTML部分をそのまま維持してください）
+
+# ---------------------------------------------------------
+# ルート定義（トップページ・購入ページ）
+# ---------------------------------------------------------
+@app.route('/')
+def index():
+    # アクセス時に期限切れの仮予約を自動で解放する
+    release_expired_seats()
+    
+    # データベースから座席の予約状況を取得してHTML_BUYを表示する例
+    conn = get_db_connection()
+    c = conn.cursor()
+    
+    # 必要に応じて公演時間（day/night）などのパラメータを受け取る処理をここに記述
+    perf = request.args.get('perf', 'day')
+    
+    if DATABASE_URL:
+        c.execute('SELECT seat_number, status, seat_type FROM seats WHERE performance_time = %s', (perf,))
+    else:
+        c.execute('SELECT seat_number, status, seat_type FROM seats WHERE performance_time = ?', (perf,))
+        
+    seats = c.fetchall()
+    conn.close()
+    
+    # HTML_BUYテンプレートを描画して返す
+    return render_template_string(HTML_BUY, seats=seats, perf=perf)
