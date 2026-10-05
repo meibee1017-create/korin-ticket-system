@@ -41,7 +41,7 @@ def get_db_connection():
 # -------------------------------------------------
 # ここにはフォールバックの公開鍵を書かず、環境変数がない場合はエラーになるようにする
 STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY")
-STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "whsec_ecbizSk8A82Ef7p7lC9ponR6OEjeWrJ")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET"）
 stripe.api_key = STRIPE_API_KEY
 
 SMTP_SERVER = "smtp.gmail.com"
