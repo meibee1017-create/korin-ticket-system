@@ -781,8 +781,8 @@ HTML_ADMIN = """
     <div class="filter-container">
         <label style="font-weight:bold; font-size:14px;">公演絞り込み:</label>
         <select id="perfFilter" onchange="loadAdminData()">
-            <option value="day">☀️ 昼公演 (13:00) のみ表示</option>
-            <option value="night">🌙 夜公演 (17:00) のみ表示</option>
+            <option value="day">☀️ 昼公演 (14:30) のみ表示</option>
+            <option value="night">🌙 夜公演 (18:00) のみ表示</option>
             <option value="all">全公演（昼・夜）を表示</option>
         </select>
         <input type="text" id="searchInput" onkeyup="filterTable()" placeholder="団員ID、予約コード、カタカナ名、座席番号で検索..." style="flex:1; max-width:400px;">
