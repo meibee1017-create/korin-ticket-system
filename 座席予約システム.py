@@ -41,13 +41,13 @@ def get_db_connection():
 # -------------------------------------------------
 # ここにはフォールバックの公開鍵を書かず、環境変数がない場合はエラーになるようにする
 STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY")
-STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "whsec_uHiYJvTzobfOKJoO2KL0y1Sx6mB3SCa0")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
 stripe.api_key = STRIPE_API_KEY
 
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 SMTP_EMAIL = os.environ.get("SMTP_EMAIL", "project0106korin@gmail.com")
-SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "tvrs ksrb dwbh dcio")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD"）
 
 TICKET_PRICE = 1000 
 FEE_CONFIG = {
