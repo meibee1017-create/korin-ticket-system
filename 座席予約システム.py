@@ -966,7 +966,11 @@ def api_buy_reserved():
     else:
         # Stripe決済の場合（仮押さえ15分）
         status = 'pending_payment'
-        expires_at = (datetime.now() + timedelta(minutes=15)).strftime('%Y-%m-%d %H:%M:%S')
+        # 決済方法に応じた支払期限の設定（カードは15分、コンビニは3日間）
+        if pay_method == 'convenience':
+            expires_at = (datetime.now() + timedelta(days=3)).strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            expires_at = (datetime.now() + timedelta(minutes=15)).strftime('%Y-%m-%d %H:%M:%S')
         for s_num in seat_numbers:
             if DATABASE_URL:
                 c.execute('''UPDATE seats SET status = %s, purchased_by = %s, email = %s, booking_code = %s, payment_method = %s, member_id = %s, expires_at = %s 
@@ -988,7 +992,7 @@ def api_buy_reserved():
             host_url = request.host_url.rstrip('/')
             
             checkout_session = stripe.checkout.Session.create(
-                payment_method_types=['card'],
+               checkout_session = stripe.checkout.Session.create(
                 line_items=[{
                     'price_data': {
                         'currency': 'jpy',
@@ -1002,6 +1006,7 @@ def api_buy_reserved():
                 cancel_url=f'{host_url}/',
                 customer_email=email,
             )
+                
             return jsonify({'success': True, 'checkout_url': checkout_session.url})
         except Exception as e:
             return jsonify({'success': False, 'message': str(e)})
