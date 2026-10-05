@@ -40,7 +40,7 @@ def get_db_connection():
 # APIキー・認証設定
 # -------------------------------------------------
 # ここにはフォールバックの公開鍵を書かず、環境変数がない場合はエラーになるようにする
-STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "pk_live_51UMcuZCoyCE0ABRGMHV0gxvqSgBowMRrzzkRI3fBY1yJorvWoDBMopP4LEPiAIJJEls4PdtdlWC0tjL80thjKVkP00okT4Xdk0")
+STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "whsec_ecbizSk8A82Ef7p7lC9ponR6OEjeWrJ")
 stripe.api_key = STRIPE_API_KEY
 
