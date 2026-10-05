@@ -126,7 +126,6 @@ def init_db():
     conn = get_db_connection()
     c = conn.cursor()
     
-    # PostgreSQLとSQLite両対応の型・構文
     if DATABASE_URL:
         c.execute('''
             CREATE TABLE IF NOT EXISTS seats (
@@ -164,12 +163,7 @@ def init_db():
             )
         ''')
     
-    # データ件数確認
-    if DATABASE_URL:
-        c.execute('SELECT COUNT(*) FROM seats')
-    else:
-        c.execute('SELECT COUNT(*) FROM seats')
-    
+    c.execute('SELECT COUNT(*) FROM seats')
     count = c.fetchone()[0]
     if count == 0:
         rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O']
@@ -214,7 +208,7 @@ def release_expired_seats():
     conn.close()
 
 # ---------------------------------------------------------
-# HTMLテンプレート（以前と同じ）
+# HTMLテンプレート（購入画面）
 # ---------------------------------------------------------
 HTML_BUY = """
 <!DOCTYPE html>
@@ -287,7 +281,7 @@ HTML_BUY = """
     <h1>昭和文化小劇場 座席予約</h1>
 
     <div class="perf-tabs">
-        <button id="tabDay" class="perf-tab active" onclick="switchPerformance('day')">☀️️ 昼公演<br><small>(13:00開演)</small></button>
+        <button id="tabDay" class="perf-tab active" onclick="switchPerformance('day')">☀ 昼公演<br><small>(13:00開演)</small></button>
         <button id="tabNight" class="perf-tab" onclick="switchPerformance('night')">🌙 夜公演<br><small>(17:00開演)</small></button>
     </div>
 
@@ -758,6 +752,7 @@ HTML_BUY = """
 </html>
 """
 
+# 管理画面のHTMLテンプレート
 HTML_ADMIN = """
 <!DOCTYPE html>
 <html lang="ja">
@@ -860,27 +855,192 @@ HTML_ADMIN = """
 """
 
 # ---------------------------------------------------------
-# ルート定義（トップページ・購入ページ）
+# ルート定義（ここで404エラーを解消！）
 # ---------------------------------------------------------
 @app.route('/')
 def index():
-    # アクセス時に期限切れの仮予約を自動で解放する
     release_expired_seats()
+    return render_template_string(HTML_BUY)
+
+@app.route('/admin')
+def admin():
+    release_expired_seats()
+    return render_template_string(HTML_ADMIN)
+
+@app.route('/api/seats', methods=['GET'])
+def api_seats():
+    release_expired_seats()
+    perf = request.args.get('perf', 'day')
     
-    # データベースから座席の予約状況を取得してHTML_BUYを表示する例
     conn = get_db_connection()
     c = conn.cursor()
     
-    # 必要に応じて公演時間（day/night）などのパラメータを受け取る処理をここに記述
-    perf = request.args.get('perf', 'day')
-    
-    if DATABASE_URL:
-        c.execute('SELECT seat_number, status, seat_type FROM seats WHERE performance_time = %s', (perf,))
+    if perf == 'all':
+        if DATABASE_URL:
+            c.execute('SELECT performance_time, seat_number, seat_type, status, purchased_by, email, payment_method, member_id, booking_code, expires_at FROM seats')
+        else:
+            c.execute('SELECT performance_time, seat_number, seat_type, status, purchased_by, email, payment_method, member_id, booking_code, expires_at FROM seats')
     else:
-        c.execute('SELECT seat_number, status, seat_type FROM seats WHERE performance_time = ?', (perf,))
-        
-    seats = c.fetchall()
+        if DATABASE_URL:
+            c.execute('SELECT performance_time, seat_number, seat_type, status, purchased_by, email, payment_method, member_id, booking_code, expires_at FROM seats WHERE performance_time = %s', (perf,))
+        else:
+            c.execute('SELECT performance_time, seat_number, seat_type, status, purchased_by, email, payment_method, member_id, booking_code, expires_at FROM seats WHERE performance_time = ?', (perf,))
+            
+    rows = c.fetchall()
     conn.close()
     
-    # HTML_BUYテンプレートを描画して返す
-    return render_template_string(HTML_BUY, seats=seats, perf=perf)
+    seats_list = []
+    for r in rows:
+        seats_list.append({
+            'performance_time': r[0],
+            'seat_number': r[1],
+            'seat_type': r[2],
+            'status': r[3],
+            'purchased_by': r[4],
+            'email': r[5],
+            'payment_method': r[6],
+            'member_id': r[7],
+            'booking_code': r[8],
+            'expires_at': r[9]
+        })
+        
+    return jsonify(seats_list)
+
+@app.route('/api/buy_reserved', methods=['POST'])
+def api_buy_reserved():
+    data = request.json
+    perf = data.get('performance_time')
+    name = data.get('name')
+    email = data.get('email')
+    pay_method = data.get('payMethod')
+    member_id = data.get('memberId', '')
+    seat_numbers = data.get('seat_numbers', [])
+    
+    if not name or not email or not seat_numbers:
+        return jsonify({'success': False, 'message': '入力内容が不足しています。'})
+        
+    if not is_katakana(name):
+        return jsonify({'success': False, 'message': 'お名前は全角カタカナで入力してください。'})
+        
+    if pay_method == 'member' and member_id not in VALID_MEMBER_IDS:
+        return jsonify({'success': False, 'message': '団員IDが無効です。'})
+        
+    conn = get_db_connection()
+    c = conn.cursor()
+    
+    # 選択された座席が空いているか確認
+    for s_num in seat_numbers:
+        if DATABASE_URL:
+            c.execute('SELECT status FROM seats WHERE performance_time = %s AND seat_number = %s', (perf, s_num))
+        else:
+            c.execute('SELECT status FROM seats WHERE performance_time = ? AND seat_number = ?', (perf, s_num))
+        row = c.fetchone()
+        if not row or row[0] != 'available':
+            conn.close()
+            return jsonify({'success': False, 'message': f'座席 {s_num} はすでに埋まっています。'})
+            
+    booking_code = generate_booking_code()
+    
+    if pay_method == 'member':
+        # 身内販売は即確定
+        status = 'sold'
+        expires_at = None
+        for s_num in seat_numbers:
+            if DATABASE_URL:
+                c.execute('''UPDATE seats SET status = %s, purchased_by = %s, email = %s, booking_code = %s, payment_method = %s, member_id = %s, expires_at = %s 
+                            WHERE performance_time = %s AND seat_number = %s''',
+                          (status, name, email, booking_code, pay_method, member_id, expires_at, perf, s_num))
+            else:
+                c.execute('''UPDATE seats SET status = ?, purchased_by = ?, email = ?, booking_code = ?, payment_method = ?, member_id = ?, expires_at = ? 
+                            WHERE performance_time = ? AND seat_number = ?''',
+                          (status, name, email, booking_code, pay_method, member_id, expires_at, perf, s_num))
+        conn.commit()
+        conn.close()
+        
+        # メール送信
+        seat_str = ", ".join(seat_numbers)
+        total_price = (TICKET_PRICE * len(seat_numbers))
+        send_confirmation_email(email, name, booking_code, perf, seat_str, total_price)
+        
+        return jsonify({'success': True, 'booking_code': booking_code})
+    else:
+        # Stripe決済の場合（仮押さえ15分）
+        status = 'pending_payment'
+        expires_at = (datetime.now() + timedelta(minutes=15)).strftime('%Y-%m-%d %H:%M:%S')
+        for s_num in seat_numbers:
+            if DATABASE_URL:
+                c.execute('''UPDATE seats SET status = %s, purchased_by = %s, email = %s, booking_code = %s, payment_method = %s, member_id = %s, expires_at = %s 
+                            WHERE performance_time = %s AND seat_number = %s''',
+                          (status, name, email, booking_code, pay_method, member_id, expires_at, perf, s_num))
+            else:
+                c.execute('''UPDATE seats SET status = ?, purchased_by = ?, email = ?, booking_code = ?, payment_method = ?, member_id = ?, expires_at = ? 
+                            WHERE performance_time = ? AND seat_number = ?''',
+                          (status, name, email, booking_code, pay_method, member_id, expires_at, perf, s_num))
+        conn.commit()
+        conn.close()
+        
+        # Stripe Checkoutセッション作成
+        try:
+            qty = len(seat_numbers)
+            unit_price = TICKET_PRICE + FEE_CONFIG.get(pay_method, 0)
+            
+            # ホストURLの取得
+            host_url = request.host_url.rstrip('/')
+            
+            checkout_session = stripe.checkout.Session.create(
+                payment_method_types=['card'],
+                line_items=[{
+                    'price_data': {
+                        'currency': 'jpy',
+                        'product_data': {'name': f'【虹凛プロジェクト】チケット ({", ".join(seat_numbers)})'},
+                        'unit_amount': unit_price,
+                    },
+                    'quantity': qty,
+                }],
+                mode='payment',
+                success_url=f'{host_url}/api/stripe_success?code={booking_code}',
+                cancel_url=f'{host_url}/',
+                customer_email=email,
+            )
+            return jsonify({'success': True, 'checkout_url': checkout_session.url})
+        except Exception as e:
+            return jsonify({'success': False, 'message': str(e)})
+
+@app.route('/api/stripe_success', methods=['GET'])
+def stripe_success():
+    booking_code = request.args.get('code')
+    if booking_code:
+        conn = get_db_connection()
+        c = conn.cursor()
+        
+        if DATABASE_URL:
+            c.execute('SELECT performance_time, seat_number, email, purchased_by, payment_method FROM seats WHERE booking_code = %s', (booking_code,))
+        else:
+            c.execute('SELECT performance_time, seat_number, email, purchased_by, payment_method FROM seats WHERE booking_code = ?', (booking_code,))
+        rows = c.fetchall()
+        
+        if rows:
+            perf = rows[0][0]
+            email = rows[0][2]
+            name = rows[0][3]
+            pay_method = rows[0][4]
+            seat_numbers = [r[1] for r in rows]
+            
+            if DATABASE_URL:
+                c.execute('UPDATE seats SET status = %s WHERE booking_code = %s', ('sold', booking_code))
+            else:
+                c.execute('UPDATE seats SET status = ? WHERE booking_code = ?', ('sold', booking_code))
+            conn.commit()
+            conn.close()
+            
+            seat_str = ", ".join(seat_numbers)
+            total_price = (TICKET_PRICE + FEE_CONFIG.get(pay_method, 0)) * len(seat_numbers)
+            send_confirmation_email(email, name, booking_code, perf, seat_str, total_price)
+            
+            return redirect(url_for('index') + '?status=success&code=' + booking_code)
+            
+        conn.close()
+    return redirect(url_for('index'))
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5500)
