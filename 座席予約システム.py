@@ -79,7 +79,7 @@ def send_confirmation_email(to_email, name, booking_code, perf_time, seat_str, t
     if not SMTP_EMAIL:
         return
     
-    perf_name = "昼公演 (13:00開演)" if perf_time == 'day' else "夜公演 (17:00開演)"
+    perf_name = "昼公演 (14:30開演)" if perf_time == 'day' else "夜公演 (18:00開演)"
     
     subject = "【虹凛プロジェクト】チケット予約・購入完了のお知らせ"
     body = f"""{name} 様
