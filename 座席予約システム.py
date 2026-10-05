@@ -281,8 +281,8 @@ HTML_BUY = """
     <h1>昭和文化小劇場 座席予約</h1>
 
     <div class="perf-tabs">
-        <button id="tabDay" class="perf-tab active" onclick="switchPerformance('day')">☀ 昼公演<br><small>(13:00開演)</small></button>
-        <button id="tabNight" class="perf-tab" onclick="switchPerformance('night')">🌙 夜公演<br><small>(17:00開演)</small></button>
+        <button id="tabDay" class="perf-tab active" onclick="switchPerformance('day')">☀ 昼公演<br><small>(14:30開演)</small></button>
+        <button id="tabNight" class="perf-tab" onclick="switchPerformance('night')">🌙 夜公演<br><small>(18:00開演)</small></button>
     </div>
 
     <div class="stage">舞 台</div>
@@ -663,7 +663,7 @@ HTML_BUY = """
             const feeSum = feeUnit * qty;
             const totalSum = ticketPriceSum + feeSum;
 
-            const perfText = (currentPerformance === 'day') ? '昼公演 (13:00開演)' : '夜公演 (17:00開演)';
+            const perfText = (currentPerformance === 'day') ? '昼公演 (14:30開演)' : '夜公演 (18:00開演)';
 
             document.getElementById('confirmDetails').innerHTML = `
                 <b>対象公演:</b> <span style="color:#d35400; font-weight:bold;">${perfText}</span><br>
@@ -855,7 +855,7 @@ HTML_ADMIN = """
 """
 
 # ---------------------------------------------------------
-# ルート定義（ここで404エラーを解消！）
+# ルート定義
 # ---------------------------------------------------------
 @app.route('/')
 def index():
@@ -1008,6 +1008,7 @@ def api_buy_reserved():
             return jsonify({'success': True, 'checkout_url': checkout_session.url})
         except Exception as e:
             return jsonify({'success': False, 'message': str(e)})
+
 @app.route('/api/stripe_success', methods=['GET'])
 def stripe_success():
     booking_code = request.args.get('code')
