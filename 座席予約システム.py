@@ -989,10 +989,10 @@ def api_buy_reserved():
             unit_price = TICKET_PRICE + FEE_CONFIG.get(pay_method, 0)
             
             # ホストURLの取得
+            # ホストURLの取得
             host_url = request.host_url.rstrip('/')
-            
+
             checkout_session = stripe.checkout.Session.create(
-               checkout_session = stripe.checkout.Session.create(
                 line_items=[{
                     'price_data': {
                         'currency': 'jpy',
@@ -1006,11 +1006,7 @@ def api_buy_reserved():
                 cancel_url=f'{host_url}/',
                 customer_email=email,
             )
-                
             return jsonify({'success': True, 'checkout_url': checkout_session.url})
-        except Exception as e:
-            return jsonify({'success': False, 'message': str(e)})
-
 @app.route('/api/stripe_success', methods=['GET'])
 def stripe_success():
     booking_code = request.args.get('code')
