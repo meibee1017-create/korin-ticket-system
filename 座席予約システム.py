@@ -964,13 +964,13 @@ def api_buy_reserved():
         
         return jsonify({'success': True, 'booking_code': booking_code})
     else:
-        # Stripe決済の場合（仮押さえ15分）
-        status = 'pending_payment'
         # 決済方法に応じた支払期限の設定（カードは15分、コンビニは3日間）
+        status = 'pending_payment'
         if pay_method == 'convenience':
             expires_at = (datetime.now() + timedelta(days=3)).strftime('%Y-%m-%d %H:%M:%S')
         else:
             expires_at = (datetime.now() + timedelta(minutes=15)).strftime('%Y-%m-%d %H:%M:%S')
+
         for s_num in seat_numbers:
             if DATABASE_URL:
                 c.execute('''UPDATE seats SET status = %s, purchased_by = %s, email = %s, booking_code = %s, payment_method = %s, member_id = %s, expires_at = %s 
@@ -984,13 +984,6 @@ def api_buy_reserved():
         conn.close()
         
         # Stripe Checkoutセッション作成
-        try:
-            qty = len(seat_numbers)
-            unit_price = TICKET_PRICE + FEE_CONFIG.get(pay_method, 0)
-            
-            # ホストURLの取得
-            # ホストURLの取得
-            # Stripe Checkoutセッション作成
         try:
             qty = len(seat_numbers)
             unit_price = TICKET_PRICE + FEE_CONFIG.get(pay_method, 0)
@@ -1015,7 +1008,6 @@ def api_buy_reserved():
             return jsonify({'success': True, 'checkout_url': checkout_session.url})
         except Exception as e:
             return jsonify({'success': False, 'message': str(e)})
-
 @app.route('/api/stripe_success', methods=['GET'])
 def stripe_success():
     booking_code = request.args.get('code')
