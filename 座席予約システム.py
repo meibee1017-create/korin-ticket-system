@@ -44,10 +44,7 @@ STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "pk_live_51UMcuZCoyCE0ABRGMHV0
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "whsec_ecbizSk8A82Ef7p7lC9ponR6OEjeWrJ7")
 stripe.api_key = STRIPE_API_KEY
 
-SMTP_SERVER = "smtp.gmail.com"
-SMTP_PORT = 587
-SMTP_EMAIL = os.environ.get("SMTP_EMAIL", "project0106korin@gmail.com")
-SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "tvrs ksrb dwbh dcio")
+
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 SENDER_EMAIL = os.environ.get("SENDER_EMAIL", "onboarding@resend.dev")
 ADMIN_EMAIL = "project0106korin@gmail.com"
