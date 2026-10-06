@@ -44,7 +44,6 @@ STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "pk_live_51UMcuZCoyCE0ABRGMHV0
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "whsec_ecbizSk8A82Ef7p7lC9ponR6OEjeWrJ7")
 stripe.api_key = STRIPE_API_KEY
 
-
 TICKET_PRICE = 1000 
 FEE_CONFIG = {
     'stripe': 100,      
@@ -72,18 +71,15 @@ def normalize_phone(text):
     """全角を半角にし、ハイフンやスペースをすべて削除して数字のみにする"""
     if not text:
         return ""
-    # 全角英数字・記号を半角に変換
     translator = str.maketrans(
         ''.join(chr(i) for i in range(0xFF01, 0xFF5F)),
         ''.join(chr(i) for i in range(0x21, 0x7F))
     )
     normalized = text.translate(translator)
-    # ハイフン (-) とスペース類をすべて削除
     normalized = re.sub(r'[\s\-ー―]', '', normalized)
     return normalized.strip()
 
 def is_phone_number(text):
-    # ハイフンなしの半角数字10〜11桁かチェック
     pattern = re.compile(r'^\d{10,11}$')
     return bool(pattern.match(text))
 
@@ -1011,7 +1007,6 @@ def api_buy_reserved():
     perf = data.get('performance_time')
     name = data.get('name')
     
-    # 電話番号からハイフン等を完全排除してハイフンなしの半角数字に統一
     phone = normalize_phone(data.get('phone', ''))
     password = data.get('password', '').strip()
     pay_method = data.get('payMethod')
@@ -1083,7 +1078,6 @@ def api_buy_reserved():
         
         return jsonify({'success': True, 'booking_code': booking_code})
     else:
-        # クレジットカードは15分、コンビニ決済は3日間（72時間）仮抑え
         status = 'pending_payment'
         if pay_method == 'convenience':
             expires_at = (datetime.now() + timedelta(days=3)).strftime('%Y-%m-%d %H:%M:%S')
@@ -1107,10 +1101,8 @@ def api_buy_reserved():
             unit_price = TICKET_PRICE + FEE_CONFIG.get(pay_method, 0)
             
             host_url = request.host_url.rstrip('/')
-            payment_method_types = ['card'] if pay_method == 'stripe' else ['konbini']
             
             checkout_session = stripe.checkout.Session.create(
-                payment_method_types=payment_method_types,
                 line_items=[{
                     'price_data': {
                         'currency': 'jpy',
@@ -1178,7 +1170,6 @@ def stripe_webhook():
 @app.route('/api/mypage', methods=['POST'])
 def api_mypage():
     data = request.json
-    # マイページログイン時も入力された電話番号からハイフン等を排除して検索
     phone = normalize_phone(data.get('phone', ''))
     password = data.get('password', '').strip()
     
