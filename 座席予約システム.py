@@ -15,24 +15,33 @@ import json
 
 app = Flask(__name__)
 
-# ---------------------------------------------------------
-# データベース接続設定 (PostgreSQL対応)
-# ---------------------------------------------------------
-
-def get_db_connection():
-    if DATABASE_URL:
-        # 直接値を指定する場合の安全な接続方法
+# --------------------------------------def get_db_connection():
+    # 関数の中で直接環境変数を取得する
+    db_url = os.environ.get("DATABASE_URL")
+    
+    if db_url:
+        # もしうっかりホスト名だけが入っていても、自動で正しい形に補正する
+        url_str = db_url.strip()
+        if not url_str.startswith("postgresql://"):
+            # （※ [パスワード] の部分をご自身のSupabaseパスワードに書き換えてね）
+            url_str = f"postgresql://postgres:Meikun0519@db.gyttdpplurbmntutdysy.supabase.co:5432/postgres"
+            
+        url = urllib.parse.urlparse(url_str)
         conn = psycopg2.connect(
-            dbname="postgres",
-            user="postgres",
-            password="あなたのパスワード",
-            host="db.gyttdpplurbmntutdysy.supabase.co",
-            port=5432
+            dbname=url.path.lstrip('/') if url.path else "postgres",
+            user=url.username or "postgres",
+            password=url.password or "あなたのパスワード",
+            host=url.hostname or "db.gyttdpplurbmntutdysy.supabase.co",
+            port=url.port or 5432
         )
         return conn
     else:
+        # ローカルテスト用 SQLite
         conn = sqlite3.connect("seats.db")
-        return conn
+        return conn-------------------
+# データベース接続設定 (PostgreSQL対応)
+# ---------------------------------------------------------
+
 # ---------------------------------------------------------
 # APIキー・認証設定
 # ---------------------------------------------------------
