@@ -45,8 +45,8 @@ STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "whsec_ecbizSk8A
 stripe.api_key = STRIPE_API_KEY
 
 
-RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
-SENDER_EMAIL = os.environ.get("SENDER_EMAIL", "onboarding@resend.dev")
+SMTP_EMAIL = os.environ.get("SMTP_EMAIL", "project0106korin@gmail.com")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "tvrs ksrb dwbh dcio") # ここにGmailの「アプリパスワード」を設定します
 ADMIN_EMAIL = "project0106korin@gmail.com"
 
 TICKET_PRICE = 1000 
@@ -77,8 +77,8 @@ def is_reserved_seat(row, num):
     return (row in reserved_rows) and (5 <= num <= 16)
 
 def send_confirmation_email(to_email, name, booking_code, perf_time, seat_str, total_price):
-    if not RESEND_API_KEY:
-        print("Resend APIキーが設定されていません。")
+    if not SMTP_PASSWORD:
+        print("SMTP_PASSWORDが設定されていません。")
         return
     
     perf_name = "昼公演 (14:30開演)" if perf_time == 'day' else "夜公演 (18:00開演)"
@@ -106,23 +106,17 @@ def send_confirmation_email(to_email, name, booking_code, perf_time, seat_str, t
 メール: {ADMIN_EMAIL}
 """
 
-    url = "https://api.resend.com/emails"
-    headers = {
-        "Authorization": f"Bearer {RESEND_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "from": SENDER_EMAIL,
-        "to": [to_email],
-        "reply_to": ADMIN_EMAIL,
-        "subject": subject,
-        "text": body
-    }
+    msg = MIMEMultipart()
+    msg['From'] = SMTP_EMAIL
+    msg['To'] = to_email
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body, 'plain'))
 
     try:
-        req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers=headers, method='POST')
-        with urllib.request.urlopen(req) as response:
-            print(f"メール送信成功: {response.status}")
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(SMTP_EMAIL, SMTP_PASSWORD)
+            server.sendmail(SMTP_EMAIL, to_email, msg.as_string())
+        print(f"メール送信成功: {to_email}")
     except Exception as e:
         print(f"メール送信エラー: {e}")
 
@@ -215,7 +209,7 @@ def release_expired_seats():
     conn.close()
 
 # ---------------------------------------------------------
-# HTMLテンプレート（購入画面）
+# HTMLテンプレート（購入画面・管理画面など）
 # ---------------------------------------------------------
 HTML_BUY = """
 <!DOCTYPE html>
