@@ -1,6 +1,4 @@
 import os
-DATABASE_URL=os.anviron.get("DATABASE_URL")
-
 import sqlite3
 import random
 import string
