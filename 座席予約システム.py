@@ -45,11 +45,6 @@ STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "whsec_ecbizSk8A
 stripe.api_key = STRIPE_API_KEY
 
 
-SMTP_SERVER = "smtp.gmail.com"
-SMTP_PORT = 587
-SMTP_EMAIL = os.environ.get("SMTP_EMAIL", "project0106korin@gmail.com")
-SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "tvrs ksrb dwbh dcio")
-
 TICKET_PRICE = 1000 
 FEE_CONFIG = {
     'stripe': 100,      
@@ -73,53 +68,14 @@ def is_katakana(text):
     pattern = re.compile(r'^[\u30A1-\u30FC\s]+$')
     return bool(pattern.match(text))
 
+def is_phone_number(text):
+    # ハイフンあり・なしの簡易的な電話番号チェック
+    pattern = re.compile(r'^\d{10,11}$|^\d{2,4}-\d{2,4}-\d{4}$')
+    return bool(pattern.match(text))
+
 def is_reserved_seat(row, num):
     reserved_rows = ['F', 'G', 'H', 'I', 'J', 'K', 'L']
     return (row in reserved_rows) and (5 <= num <= 16)
-
-def send_confirmation_email(to_email, name, booking_code, perf_time, seat_str, total_price):
-    if not SMTP_EMAIL:
-        return
-    
-    perf_name = "昼公演 (14:30開演)" if perf_time == 'day' else "夜公演 (18:00開演)"
-    
-    subject = "【虹凛プロジェクト】チケット予約・購入完了のお知らせ"
-    body = f"""{name} 様
-
-この度は『虹凛プロジェクト』公演チケットをご予約・ご購入いただき誠にありがとうございます。
-決済および予約手続きが正常に完了いたしました。
-
-■ ご予約内容
-----------------------------------------
-予約コード: {booking_code}
-対象公演: {perf_name}
-座席情報: {seat_str}
-合計金額: ¥{total_price:,}
-----------------------------------------
-
-当日は受付にてこちらの予約コード（{booking_code}）をお手元にご準備の上、ご提示をお願いいたします。
-
-皆様のご来場を心よりお待ちしております。
-
-----------------------------------------
-虹凛プロジェクト 制作部
-メール: {SMTP_EMAIL}
-"""
-
-    msg = MIMEMultipart()
-    msg['From'] = SMTP_EMAIL
-    msg['To'] = to_email
-    msg['Subject'] = subject
-    msg.attach(MIMEText(body, 'plain', 'utf-8'))
-
-    try:
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls()
-        server.login(SMTP_EMAIL, SMTP_PASSWORD)
-        server.send_message(msg)
-        server.quit()
-    except Exception as e:
-        print(f"メール送信エラー: {e}")
 
 # ---------------------------------------------------------
 # データベース初期化
@@ -139,7 +95,8 @@ def init_db():
                 seat_type TEXT,
                 status TEXT DEFAULT 'available',
                 purchased_by TEXT,
-                email TEXT,
+                phone TEXT,
+                password TEXT,
                 booking_code TEXT,
                 payment_method TEXT,
                 member_id TEXT,
@@ -157,7 +114,8 @@ def init_db():
                 seat_type TEXT,
                 status TEXT DEFAULT 'available',
                 purchased_by TEXT,
-                email TEXT,
+                phone TEXT,
+                password TEXT,
                 booking_code TEXT,
                 payment_method TEXT,
                 member_id TEXT,
@@ -178,11 +136,11 @@ def init_db():
                     status = 'sold' if r in ['M', 'N', 'O'] else 'available'
                     
                     if DATABASE_URL:
-                        c.execute('INSERT INTO seats (performance_time, seat_number, row_label, seat_num, seat_type, status, purchased_by, email, booking_code, payment_method, member_id, expires_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)',
-                                  (perf, seat_num_str, r, num, stype, status, '', '', '', '', '', None))
+                        c.execute('INSERT INTO seats (performance_time, seat_number, row_label, seat_num, seat_type, status, purchased_by, phone, password, booking_code, payment_method, member_id, expires_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)',
+                                  (perf, seat_num_str, r, num, stype, status, '', '', '', '', '', '', None))
                     else:
-                        c.execute('INSERT INTO seats (performance_time, seat_number, row_label, seat_num, seat_type, status, purchased_by, email, booking_code, payment_method, member_id, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                                  (perf, seat_num_str, r, num, stype, status, '', '', '', '', '', None))
+                        c.execute('INSERT INTO seats (performance_time, seat_number, row_label, seat_num, seat_type, status, purchased_by, phone, password, booking_code, payment_method, member_id, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                                  (perf, seat_num_str, r, num, stype, status, '', '', '', '', '', '', None))
         conn.commit()
     conn.close()
 
@@ -196,13 +154,13 @@ def release_expired_seats():
     if DATABASE_URL:
         c.execute('''
             UPDATE seats 
-            SET status = 'available', purchased_by = '', email = '', booking_code = '', payment_method = '', member_id = '', expires_at = NULL 
+            SET status = 'available', purchased_by = '', phone = '', password = '', booking_code = '', payment_method = '', member_id = '', expires_at = NULL 
             WHERE status = 'pending_payment' AND expires_at IS NOT NULL AND expires_at < %s
         ''', (now_str,))
     else:
         c.execute('''
             UPDATE seats 
-            SET status = 'available', purchased_by = '', email = '', booking_code = '', payment_method = '', member_id = '', expires_at = NULL 
+            SET status = 'available', purchased_by = '', phone = '', password = '', booking_code = '', payment_method = '', member_id = '', expires_at = NULL 
             WHERE status = 'pending_payment' AND expires_at IS NOT NULL AND expires_at < ?
         ''', (now_str,))
         
@@ -210,7 +168,7 @@ def release_expired_seats():
     conn.close()
 
 # ---------------------------------------------------------
-# HTMLテンプレート（購入画面）
+# HTMLテンプレート（購入画面 兼 マイページ）
 # ---------------------------------------------------------
 HTML_BUY = """
 <!DOCTYPE html>
@@ -223,6 +181,10 @@ HTML_BUY = """
         body { font-family: sans-serif; text-align: center; padding: 10px; background: #f4f4f9; margin: 0; }
         h1 { font-size: 20px; margin: 10px 0; }
         
+        .top-nav { display: flex; justify-content: center; gap: 10px; margin-bottom: 15px; }
+        .nav-btn { padding: 8px 16px; font-size: 13px; font-weight: bold; border: 1px solid #007bff; background: white; color: #007bff; border-radius: 20px; cursor: pointer; }
+        .nav-btn.active { background: #007bff; color: white; }
+
         .perf-tabs { display: flex; justify-content: center; gap: 10px; margin-bottom: 15px; }
         .perf-tab { flex: 1; max-width: 200px; padding: 12px; font-weight: bold; border: 2px solid #333; border-radius: 8px; background: white; color: #333; cursor: pointer; font-size: 14px; }
         .perf-tab.active { background: #333; color: white; border-color: #333; }
@@ -249,12 +211,12 @@ HTML_BUY = """
         .legend-item { display: flex; align-items: center; gap: 5px; }
         .legend-box { width: 15px; height: 15px; border-radius: 3px; }
         
-        .checkout { background: white; padding: 15px; border-radius: 8px; max-width: 420px; margin: 10px auto; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .checkout, .mypage-box { background: white; padding: 15px; border-radius: 8px; max-width: 420px; margin: 10px auto; box-shadow: 0 2px 8px rgba(0,0,0,0.1); text-align: left; }
         .mode-switch { margin-bottom: 15px; }
         .mode-btn { padding: 8px 12px; font-size: 12px; border: 1px solid #007bff; background: white; color: #007bff; border-radius: 4px; cursor: pointer; }
         .mode-btn.active { background: #007bff; color: white; font-weight: bold; }
         
-        .form-group { margin: 10px 0; text-align: left; padding: 0 10px; }
+        .form-group { margin: 10px 0; }
         .form-group label { font-size: 13px; font-weight: bold; display: block; margin-bottom: 4px; color: #333; }
         input, select, button { padding: 10px; font-size: 14px; border-radius: 4px; border: 1px solid #ccc; box-sizing: border-box; width: 100%; }
         button.submit-btn { background: #007bff; color: white; border: none; font-weight: bold; cursor: pointer; margin-top: 10px; }
@@ -268,104 +230,140 @@ HTML_BUY = """
         .invoice-total { display: flex; justify-content: space-between; margin-top: 8px; padding-top: 8px; border-top: 2px solid #333; font-weight: bold; font-size: 15px; color: #d35400; }
         
         .terms-box { background: #fdfdfd; border: 1px solid #ccc; font-size: 11px; padding: 10px; height: 110px; overflow-y: scroll; margin: 10px 0; color: #333; line-height: 1.5; white-space: pre-wrap; }
-        .agree-check { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: bold; margin: 10px 0; text-align: left; }
+        .agree-check { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: bold; margin: 10px 0; }
         .agree-check input { width: auto; cursor: pointer; }
 
         .tokusho-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
         .tokusho-table th, .tokusho-table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
         .tokusho-table th { background: #f1f1f1; width: 35%; }
 
-        .footer-links { margin: 25px 0 15px; font-size: 12px; color: #666; }
+        .footer-links { margin: 25px 0 15px; font-size: 12px; color: #666; text-align: center; }
         .footer-links a { color: #007bff; text-decoration: underline; cursor: pointer; }
+        
+        .ticket-card { background: #fffcf0; border: 2px solid #f39c12; border-radius: 6px; padding: 12px; margin-bottom: 12px; font-size: 13px; }
     </style>
 </head>
 <body>
     <h1>昭和文化小劇場 座席予約</h1>
 
-    <div class="perf-tabs">
-        <button id="tabDay" class="perf-tab active" onclick="switchPerformance('day')">☀ 昼公演<br><small>(14:30開演)</small></button>
-        <button id="tabNight" class="perf-tab" onclick="switchPerformance('night')">🌙 夜公演<br><small>(18:00開演)</small></button>
+    <div class="top-nav">
+        <button id="navBooking" class="nav-btn active" onclick="switchMainTab('booking')">🎫 チケットを予約・購入する</button>
+        <button id="navMypage" class="nav-btn" onclick="switchMainTab('mypage')">👤 マイページ（予約確認）</button>
     </div>
 
-    <div class="stage">舞 台</div>
+    <!-- 予約画面セクション -->
+    <div id="sectionBooking">
+        <div class="perf-tabs">
+            <button id="tabDay" class="perf-tab active" onclick="switchPerformance('day')">☀ 昼公演<br><small>(14:30開演)</small></button>
+            <button id="tabNight" class="perf-tab" onclick="switchPerformance('night')">🌙 夜公演<br><small>(18:00開演)</small></button>
+        </div>
 
-    <div class="legend">
-        <div class="legend-item"><div class="legend-box" style="background:#2980b9;"></div>指定席 (F5〜L16)</div>
-        <div class="legend-item"><div class="legend-box" style="background:#95a5a6; opacity:0.6;"></div>自由席エリア</div>
-        <div class="legend-item"><div class="legend-box" style="background:#f39c12;"></div>選択中 / 決済手続き中</div>
-        <div class="legend-item"><div class="legend-box" style="background:#e74c3c;"></div>予約済 / 予約不可</div>
+        <div class="stage">舞 台</div>
+
+        <div class="legend">
+            <div class="legend-item"><div class="legend-box" style="background:#2980b9;"></div>指定席 (F5〜L16)</div>
+            <div class="legend-item"><div class="legend-box" style="background:#95a5a6; opacity:0.6;"></div>自由席エリア</div>
+            <div class="legend-item"><div class="legend-box" style="background:#f39c12;"></div>選択中 / 決済手続き中</div>
+            <div class="legend-item"><div class="legend-box" style="background:#e74c3c;"></div>予約済 / 予約不可</div>
+        </div>
+
+        <div class="theater-container">
+            <div id="seatingChart" class="seating-chart"></div>
+        </div>
+
+        <div class="checkout">
+            <div class="mode-switch">
+                <button id="btnModeReserved" class="mode-btn active" onclick="setMode('reserved')">指定席を選択して予約</button>
+                <button id="btnModeUnreserved" class="mode-btn" onclick="setMode('unreserved')">自由席を枚数購入</button>
+            </div>
+
+            <div id="formReserved">
+                <h4 style="margin:5px 0;">選択指定席: <span id="selectedSeatNum" style="color:#d35400;">なし</span></h4>
+                <div class="form-group">
+                    <label>お名前（全角カタカナのみ）</label>
+                    <input type="text" id="userNameReserved" placeholder="ヤマダ タロウ">
+                </div>
+                <div class="form-group">
+                    <label>電話番号（ハイフンなし または あり）</label>
+                    <input type="text" id="userPhoneReserved" placeholder="09012345678">
+                </div>
+                <div class="form-group">
+                    <label>マイページ用パスワード（英数字4〜8桁など）</label>
+                    <input type="password" id="userPasswordReserved" placeholder="任意のパスワードを設定">
+                </div>
+                <div class="form-group">
+                    <label>お支払い・購入方法</label>
+                    <select id="payMethodReserved" onchange="toggleMemberInput('reserved')">
+                        <option value="stripe">クレジットカード決済 (Stripe)</option>
+                        <option value="convenience">コンビニ決済 (Stripe)</option>
+                        <option value="member">身内販売（団員経由・即確定）</option>
+                    </select>
+                </div>
+                <div class="form-group" id="memberGroupReserved" style="display:none;">
+                    <label style="color:#d35400;">団員ID（数字5桁）</label>
+                    <input type="text" id="memberIdReserved" placeholder="例: 15212" maxlength="5">
+                </div>
+                <button class="submit-btn" onclick="openConfirmModal()">購入内容の確認へ進む</button>
+            </div>
+
+            <div id="formUnreserved" style="display:none;">
+                <h4 style="margin:5px 0;">自由席購入</h4>
+                <p style="font-size:12px; color:#666; margin:2px 0;">（残り自由席: <span id="unreservedCount">-</span> 席）</p>
+                <div class="form-group">
+                    <label>枚数選択</label>
+                    <select id="unreservedQty">
+                        <option value="1">1枚</option>
+                        <option value="2">2枚</option>
+                        <option value="3">3枚</option>
+                        <option value="4">4枚</option>
+                        <option value="5">5枚</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>代表者お名前（全角カタカナのみ）</label>
+                    <input type="text" id="userNameUnreserved" placeholder="ヤマダ タロウ">
+                </div>
+                <div class="form-group">
+                    <label>電話番号（ハイフンなし または あり）</label>
+                    <input type="text" id="userPhoneUnreserved" placeholder="09012345678">
+                </div>
+                <div class="form-group">
+                    <label>マイページ用パスワード</label>
+                    <input type="password" id="userPasswordUnreserved" placeholder="任意のパスワードを設定">
+                </div>
+                <div class="form-group">
+                    <label>お支払い・購入方法</label>
+                    <select id="payMethodUnreserved" onchange="toggleMemberInput('unreserved')">
+                        <option value="stripe">クレジットカード決済 (Stripe)</option>
+                        <option value="convenience">コンビニ決済 (Stripe)</option>
+                        <option value="member">身内販売（団員経由・即確定）</option>
+                    </select>
+                </div>
+                <div class="form-group" id="memberGroupUnreserved" style="display:none;">
+                    <label style="color:#d35400;">団員ID（数字5桁）</label>
+                    <input type="text" id="memberIdUnreserved" placeholder="例: 15212" maxlength="5">
+                </div>
+                <button class="submit-btn" onclick="openConfirmModal()">購入内容の確認へ進む</button>
+            </div>
+        </div>
     </div>
 
-    <div class="theater-container">
-        <div id="seatingChart" class="seating-chart"></div>
-    </div>
-
-    <div class="checkout">
-        <div class="mode-switch">
-            <button id="btnModeReserved" class="mode-btn active" onclick="setMode('reserved')">指定席を選択して予約</button>
-            <button id="btnModeUnreserved" class="mode-btn" onclick="setMode('unreserved')">自由席を枚数購入</button>
+    <!-- マイページ画面セクション -->
+    <div id="sectionMypage" style="display:none;">
+        <div class="mypage-box">
+            <h3 style="margin-top:0; text-align:center;">マイページ（予約確認）</h3>
+            <p style="font-size: 12px; color: #666; text-align: center;">ご購入時に登録した電話番号とパスワードを入力してください。</p>
+            <div class="form-group">
+                <label>電話番号</label>
+                <input type="text" id="loginPhone" placeholder="09012345678">
+            </div>
+            <div class="form-group">
+                <label>パスワード</label>
+                <input type="password" id="loginPassword" placeholder="パスワード">
+            </div>
+            <button class="submit-btn" onclick="fetchMypage()">予約情報を確認する</button>
         </div>
-
-        <div id="formReserved">
-            <h4 style="margin:5px 0;">選択指定席: <span id="selectedSeatNum" style="color:#d35400;">なし</span></h4>
-            <div class="form-group">
-                <label>お名前（全角カタカナのみ）</label>
-                <input type="text" id="userNameReserved" placeholder="ヤマダ タロウ">
-            </div>
-            <div class="form-group">
-                <label>メールアドレス（予約確認送信用）</label>
-                <input type="email" id="userEmailReserved" placeholder="example@gmail.com">
-            </div>
-            <div class="form-group">
-                <label>お支払い・購入方法</label>
-                <select id="payMethodReserved" onchange="toggleMemberInput('reserved')">
-                    <option value="stripe">クレジットカード決済 (Stripe)</option>
-                    <option value="convenience">コンビニ決済 (Stripe)</option>
-                    <option value="member">身内販売（団員経由・即確定）</option>
-                </select>
-            </div>
-            <div class="form-group" id="memberGroupReserved" style="display:none;">
-                <label style="color:#d35400;">団員ID（数字5桁）</label>
-                <input type="text" id="memberIdReserved" placeholder="例: 15212" maxlength="5">
-            </div>
-            <button class="submit-btn" onclick="openConfirmModal()">購入内容の確認へ進む</button>
-        </div>
-
-        <div id="formUnreserved" style="display:none;">
-            <h4 style="margin:5px 0;">自由席購入</h4>
-            <p style="font-size:12px; color:#666; margin:2px 0;">（残り自由席: <span id="unreservedCount">-</span> 席）</p>
-            <div class="form-group">
-                <label>枚数選択</label>
-                <select id="unreservedQty">
-                    <option value="1">1枚</option>
-                    <option value="2">2枚</option>
-                    <option value="3">3枚</option>
-                    <option value="4">4枚</option>
-                    <option value="5">5枚</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>代表者お名前（全角カタカナのみ）</label>
-                <input type="text" id="userNameUnreserved" placeholder="ヤマダ タロウ">
-            </div>
-            <div class="form-group">
-                <label>メールアドレス（予約確認送信用）</label>
-                <input type="email" id="userEmailUnreserved" placeholder="example@gmail.com">
-            </div>
-            <div class="form-group">
-                <label>お支払い・購入方法</label>
-                <select id="payMethodUnreserved" onchange="toggleMemberInput('unreserved')">
-                    <option value="stripe">クレジットカード決済 (Stripe)</option>
-                    <option value="convenience">コンビニ決済 (Stripe)</option>
-                    <option value="member">身内販売（団員経由・即確定）</option>
-                </select>
-            </div>
-            <div class="form-group" id="memberGroupUnreserved" style="display:none;">
-                <label style="color:#d35400;">団員ID（数字5桁）</label>
-                <input type="text" id="memberIdUnreserved" placeholder="例: 15212" maxlength="5">
-            </div>
-            <button class="submit-btn" onclick="openConfirmModal()">購入内容の確認へ進む</button>
-        </div>
+        <div id="mypageResult" style="max-width: 420px; margin: 10px auto;"></div>
     </div>
 
     <!-- フッターリンク -->
@@ -406,7 +404,7 @@ HTML_BUY = """
 
             <div class="agree-check">
                 <input type="checkbox" id="agreeTerms" onchange="toggleSubmitBtn()">
-                <label for="agreeTerms">注意事項・利用規約および<a href="javascript:void(0)" onclick="openTokushoModal()" style="color:#007bff; text-decoration:underline;">特定商取引法に基づく表記</a>に同意する</label>
+                <label for="agreeTerms">注意事項・利用規約および特定商取引法に基づく表記に同意する</label>
             </div>
 
             <button id="finalSubmitBtn" class="submit-btn" style="background:#27ae60; opacity:0.5;" disabled onclick="executePurchase()">予約・決済手続きへ進む</button>
@@ -449,7 +447,7 @@ HTML_BUY = """
                 </tr>
                 <tr>
                     <th>引き渡し時期</th>
-                    <td>決済完了後、画面上および電子メールにて予約コードを即時発行いたします。（当日は受付にて予約コードをご提示いただくことでご入場いただけます）</td>
+                    <td>決済完了後、マイページにて予約コードを即時発行いたします。（当日は受付にて予約コードをご提示いただくことでご入場いただけます）</td>
                 </tr>
                 <tr>
                     <th>キャンセル・返品（返金）について</th>
@@ -460,14 +458,13 @@ HTML_BUY = """
         </div>
     </div>
 
-    <!-- 予約完了モーダル -->
+    <!-- 予約完了モーダル（身内販売用） -->
     <div id="successModal" class="modal">
         <div class="modal-content" style="text-align:center;">
             <h3>予約が完了しました！</h3>
-            <p style="font-size: 13px; color: #555;">受付・身内販売の確認に使用しますので、以下の予約コードをお控えください。</p>
+            <p style="font-size: 13px; color: #555;">受付で使用しますので、以下の予約コードをお控えください。<br>（※「マイページ」からもいつでも確認できます）</p>
             <div id="modalCode" class="code-display">------</div>
-            <p style="font-size: 12px; color: #666;">※ご登録のメールアドレスにも確認メールを送信しました。</p>
-            <button onclick="closeSuccessModal()" style="width:100%; background:#007bff; color:white; border:none; padding:10px; border-radius:4px; font-weight:bold;">閉じる</button>
+            <button onclick="closeSuccessModal()" style="width:100%; background:#007bff; color:white; border:none; padding:10px; border-radius:4px; font-weight:bold; cursor:pointer;">マイページで確認する</button>
         </div>
     </div>
 
@@ -486,10 +483,26 @@ HTML_BUY = """
             const status = params.get('status');
             const code = params.get('code');
             if (status === 'success' && code) {
+                // Stripe決済完了後の戻り
+                switchMainTab('mypage');
                 showSuccessModal(code);
                 window.history.replaceState({}, document.title, window.location.pathname);
             }
         });
+
+        function switchMainTab(tab) {
+            if (tab === 'booking') {
+                document.getElementById('sectionBooking').style.display = 'block';
+                document.getElementById('sectionMypage').style.display = 'none';
+                document.getElementById('navBooking').classList.add('active');
+                document.getElementById('navMypage').classList.remove('active');
+            } else {
+                document.getElementById('sectionBooking').style.display = 'none';
+                document.getElementById('sectionMypage').style.display = 'block';
+                document.getElementById('navMypage').classList.add('active');
+                document.getElementById('navBooking').classList.remove('active');
+            }
+        }
 
         function switchPerformance(perf) {
             currentPerformance = perf;
@@ -633,12 +646,13 @@ HTML_BUY = """
         }
 
         function openConfirmModal() {
-            let name, email, payMethod, memberId, qty, seatTypeStr, seatsStr;
+            let name, phone, password, payMethod, memberId, qty, seatTypeStr, seatsStr;
 
             if (currentMode === 'reserved') {
                 if (selectedSeats.length === 0) return alert('指定席をマップから1つ以上選択してください');
                 name = document.getElementById('userNameReserved').value.trim();
-                email = document.getElementById('userEmailReserved').value.trim();
+                phone = document.getElementById('userPhoneReserved').value.trim();
+                password = document.getElementById('userPasswordReserved').value.trim();
                 payMethod = document.getElementById('payMethodReserved').value;
                 memberId = document.getElementById('memberIdReserved').value.trim();
                 qty = selectedSeats.length;
@@ -647,7 +661,8 @@ HTML_BUY = """
             } else {
                 qty = parseInt(document.getElementById('unreservedQty').value);
                 name = document.getElementById('userNameUnreserved').value.trim();
-                email = document.getElementById('userEmailUnreserved').value.trim();
+                phone = document.getElementById('userPhoneUnreserved').value.trim();
+                password = document.getElementById('userPasswordUnreserved').value.trim();
                 payMethod = document.getElementById('payMethodUnreserved').value;
                 memberId = document.getElementById('memberIdUnreserved').value.trim();
                 seatTypeStr = '自由席';
@@ -655,10 +670,11 @@ HTML_BUY = """
             }
 
             if (!name) return alert('お名前を入力してください');
-            if (!email) return alert('メールアドレスを入力してください');
+            if (!phone) return alert('電話番号を入力してください');
+            if (!password) return alert('マイページ用パスワードを入力してください');
             if (payMethod === 'member' && !memberId) return alert('身内販売の場合は団員IDを入力してください');
 
-            pendingPurchaseData = { performance_time: currentPerformance, mode: currentMode, name, email, payMethod, memberId, qty, seat_numbers: selectedSeats };
+            pendingPurchaseData = { performance_time: currentPerformance, mode: currentMode, name, phone, password, payMethod, memberId, qty, seat_numbers: selectedSeats };
 
             const ticketPriceSum = TICKET_PRICE * qty;
             const feeUnit = FEE_CONFIG[payMethod] || 0;
@@ -670,7 +686,7 @@ HTML_BUY = """
             document.getElementById('confirmDetails').innerHTML = `
                 <b>対象公演:</b> <span style="color:#d35400; font-weight:bold;">${perfText}</span><br>
                 <b>お名前:</b> ${name}<br>
-                <b>メールアドレス:</b> ${email}<br>
+                <b>電話番号:</b> ${phone}<br>
                 <b>座席種別:</b> ${seatTypeStr}<br>
                 <b>座席情報:</b> ${seatsStr}<br>
                 <b>お支払い方法:</b> ${PAY_NAMES[payMethod]} ${payMethod === 'member' ? '(団員ID: ' + memberId + ')' : ''}
@@ -718,21 +734,12 @@ HTML_BUY = """
             closeConfirmModal();
 
             if (data.success) {
-                // Stripe決済などでリダイレクト先URLがある場合
                 if (data.checkout_url) {
                     window.location.href = data.checkout_url;
-                } 
-                // 身内販売などでその場で完了コードを発行する場合
-                else if (data.booking_code) {
+                } else if (data.booking_code) {
                     showSuccessModal(data.booking_code);
                     selectedSeats = [];
                     updateSelectedSeatsDisplay();
-                    document.getElementById('userNameReserved').value = '';
-                    document.getElementById('userEmailReserved').value = '';
-                    document.getElementById('userNameUnreserved').value = '';
-                    document.getElementById('userEmailUnreserved').value = '';
-                    document.getElementById('memberIdReserved').value = '';
-                    document.getElementById('memberIdUnreserved').value = '';
                     loadSeats();
                 } else {
                     alert('予約は完了しましたが、予約コードの取得に失敗しました。');
@@ -749,7 +756,63 @@ HTML_BUY = """
 
         function closeSuccessModal() {
             document.getElementById('successModal').style.display = 'none';
+            switchMainTab('mypage');
             loadSeats();
+        }
+
+        async function fetchMypage() {
+            const phone = document.getElementById('loginPhone').value.trim();
+            const password = document.getElementById('loginPassword').value.trim();
+            const resultDiv = document.getElementById('mypageResult');
+
+            if (!phone || !password) {
+                alert('電話番号とパスワードを入力してください');
+                return;
+            }
+
+            resultDiv.innerHTML = '<p style="text-align:center; color:#666;">検索中...</p>';
+
+            try {
+                const res = await fetch('/api/mypage', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ phone, password })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    if (data.tickets.length === 0) {
+                        resultDiv.innerHTML = '<div class="mypage-box"><p style="text-align:center; color:#e74c3c; margin:0;">該当する予約情報が見つかりませんでした。<br><small>入力内容をご確認ください。</small></p></div>';
+                        return;
+                    }
+
+                    let html = '<div class="mypage-box"><h4 style="margin-top:0; border-bottom:1px solid #eee; padding-bottom:6px;">ご予約一覧（お名前: ' + data.name + ' 様）</h4>';
+                    data.tickets.forEach(t => {
+                        const perfText = t.performance_time === 'day' ? '昼公演 (14:30開演)' : '夜公演 (18:00開演)';
+                        const payText = PAY_NAMES[t.payment_method] || t.payment_method;
+                        const statusBadge = t.status === 'sold' ? '<span style="color:green; font-weight:bold;">購入完了</span>' : '<span style="color:orange; font-weight:bold;">決済手続き中・期限あり</span>';
+
+                        html += `
+                            <div class="ticket-card">
+                                <b>対象公演:</b> ${perfText}<br>
+                                <b>座席番号:</b> <span style="color:#d35400; font-weight:bold;">${t.seat_number}</span><br>
+                                <b>ステータス:</b> ${statusBadge}<br>
+                                <b>支払い方法:</b> ${payText}<br>
+                                <div style="text-align:center; margin-top:8px;">
+                                    <div style="font-size:11px; color:#555;">予約コード（受付で提示）</div>
+                                    <div style="font-size:20px; font-weight:bold; color:#e74c3c; letter-spacing:2px;">${t.booking_code}</div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    html += '</div>';
+                    resultDiv.innerHTML = html;
+                } else {
+                    resultDiv.innerHTML = `<div class="mypage-box"><p style="text-align:center; color:#e74c3c; margin:0;">${data.message}</p></div>`;
+                }
+            } catch (err) {
+                resultDiv.innerHTML = '<div class="mypage-box"><p style="text-align:center; color:#e74c3c; margin:0;">通信エラーが発生しました。</p></div>';
+            }
         }
 
         loadSeats();
@@ -791,7 +854,7 @@ HTML_ADMIN = """
             <option value="night">🌙 夜公演 (18:00) のみ表示</option>
             <option value="all">全公演（昼・夜）を表示</option>
         </select>
-        <input type="text" id="searchInput" onkeyup="filterTable()" placeholder="団員ID、予約コード、カタカナ名、座席番号で検索..." style="flex:1; max-width:400px;">
+        <input type="text" id="searchInput" onkeyup="filterTable()" placeholder="団員ID、予約コード、名前、電話番号、座席番号で検索..." style="flex:1; max-width:400px;">
     </div>
     
     <table id="seatTable">
@@ -802,7 +865,7 @@ HTML_ADMIN = """
                 <th>種別</th>
                 <th>状態</th>
                 <th>カタカナ名</th>
-                <th>メール</th>
+                <th>電話番号</th>
                 <th>決済方法</th>
                 <th>団員ID</th>
                 <th>予約コード</th>
@@ -839,7 +902,7 @@ HTML_ADMIN = """
                 const memberStr = s.member_id ? `<b>${s.member_id}</b>` : '-';
                 const expiresStr = s.expires_at ? s.expires_at : '-';
 
-                tr.innerHTML = `<td>${perfBadge}</td><td>${s.seat_number}</td><td>${typeBadge}</td><td>${statusStr}</td><td>${s.purchased_by || '-'}</td><td>${s.email || '-'}</td><td>${payStr}</td><td>${memberStr}</td><td>${codeStr}</td><td><small>${expiresStr}</small></td>`;
+                tr.innerHTML = `<td>${perfBadge}</td><td>${s.seat_number}</td><td>${typeBadge}</td><td>${statusStr}</td><td>${s.purchased_by || '-'}</td><td>${s.phone || '-'}</td><td>${payStr}</td><td>${memberStr}</td><td>${codeStr}</td><td><small>${expiresStr}</small></td>`;
                 tbody.appendChild(tr);
             });
             filterTable();
@@ -883,14 +946,14 @@ def api_seats():
     
     if perf == 'all':
         if DATABASE_URL:
-            c.execute('SELECT performance_time, seat_number, seat_type, status, purchased_by, email, payment_method, member_id, booking_code, expires_at FROM seats')
+            c.execute('SELECT performance_time, seat_number, seat_type, status, purchased_by, phone, payment_method, member_id, booking_code, expires_at FROM seats')
         else:
-            c.execute('SELECT performance_time, seat_number, seat_type, status, purchased_by, email, payment_method, member_id, booking_code, expires_at FROM seats')
+            c.execute('SELECT performance_time, seat_number, seat_type, status, purchased_by, phone, payment_method, member_id, booking_code, expires_at FROM seats')
     else:
         if DATABASE_URL:
-            c.execute('SELECT performance_time, seat_number, seat_type, status, purchased_by, email, payment_method, member_id, booking_code, expires_at FROM seats WHERE performance_time = %s', (perf,))
+            c.execute('SELECT performance_time, seat_number, seat_type, status, purchased_by, phone, payment_method, member_id, booking_code, expires_at FROM seats WHERE performance_time = %s', (perf,))
         else:
-            c.execute('SELECT performance_time, seat_number, seat_type, status, purchased_by, email, payment_method, member_id, booking_code, expires_at FROM seats WHERE performance_time = ?', (perf,))
+            c.execute('SELECT performance_time, seat_number, seat_type, status, purchased_by, phone, payment_method, member_id, booking_code, expires_at FROM seats WHERE performance_time = ?', (perf,))
             
     rows = c.fetchall()
     conn.close()
@@ -903,7 +966,7 @@ def api_seats():
             'seat_type': r[2],
             'status': r[3],
             'purchased_by': r[4],
-            'email': r[5],
+            'phone': r[5],
             'payment_method': r[6],
             'member_id': r[7],
             'booking_code': r[8],
@@ -917,16 +980,20 @@ def api_buy_reserved():
     data = request.json
     perf = data.get('performance_time')
     name = data.get('name')
-    email = data.get('email')
+    phone = data.get('phone')
+    password = data.get('password')
     pay_method = data.get('payMethod')
     member_id = data.get('memberId', '')
     mode = data.get('mode', 'reserved')
     
-    if not name or not email:
+    if not name or not phone or not password:
         return jsonify({'success': False, 'message': '入力内容が不足しています。'})
         
     if not is_katakana(name):
         return jsonify({'success': False, 'message': 'お名前は全角カタカナで入力してください。'})
+        
+    if not is_phone_number(phone):
+        return jsonify({'success': False, 'message': '電話番号の形式が正しくありません。'})
         
     if pay_method == 'member' and member_id not in VALID_MEMBER_IDS:
         return jsonify({'success': False, 'message': '団員IDが無効です。'})
@@ -972,19 +1039,15 @@ def api_buy_reserved():
         expires_at = None
         for s_num in target_seats:
             if DATABASE_URL:
-                c.execute('''UPDATE seats SET status = %s, purchased_by = %s, email = %s, booking_code = %s, payment_method = %s, member_id = %s, expires_at = %s 
+                c.execute('''UPDATE seats SET status = %s, purchased_by = %s, phone = %s, password = %s, booking_code = %s, payment_method = %s, member_id = %s, expires_at = %s 
                             WHERE performance_time = %s AND seat_number = %s''',
-                          (status, name, email, booking_code, pay_method, member_id, expires_at, perf, s_num))
+                          (status, name, phone, password, booking_code, pay_method, member_id, expires_at, perf, s_num))
             else:
-                c.execute('''UPDATE seats SET status = ?, purchased_by = ?, email = ?, booking_code = ?, payment_method = ?, member_id = ?, expires_at = ? 
+                c.execute('''UPDATE seats SET status = ?, purchased_by = ?, phone = ?, password = ?, booking_code = ?, payment_method = ?, member_id = ?, expires_at = ? 
                             WHERE performance_time = ? AND seat_number = ?''',
-                          (status, name, email, booking_code, pay_method, member_id, expires_at, perf, s_num))
+                          (status, name, phone, password, booking_code, pay_method, member_id, expires_at, perf, s_num))
         conn.commit()
         conn.close()
-        
-        seat_str = ", ".join(target_seats)
-        total_price = (TICKET_PRICE * len(target_seats))
-        send_confirmation_email(email, name, booking_code, perf, seat_str, total_price)
         
         return jsonify({'success': True, 'booking_code': booking_code})
     else:
@@ -996,13 +1059,13 @@ def api_buy_reserved():
 
         for s_num in target_seats:
             if DATABASE_URL:
-                c.execute('''UPDATE seats SET status = %s, purchased_by = %s, email = %s, booking_code = %s, payment_method = %s, member_id = %s, expires_at = %s 
+                c.execute('''UPDATE seats SET status = %s, purchased_by = %s, phone = %s, password = %s, booking_code = %s, payment_method = %s, member_id = %s, expires_at = %s 
                             WHERE performance_time = %s AND seat_number = %s''',
-                          (status, name, email, booking_code, pay_method, member_id, expires_at, perf, s_num))
+                          (status, name, phone, password, booking_code, pay_method, member_id, expires_at, perf, s_num))
             else:
-                c.execute('''UPDATE seats SET status = ?, purchased_by = ?, email = ?, booking_code = ?, payment_method = ?, member_id = ?, expires_at = ? 
+                c.execute('''UPDATE seats SET status = ?, purchased_by = ?, phone = ?, password = ?, booking_code = ?, payment_method = ?, member_id = ?, expires_at = ? 
                             WHERE performance_time = ? AND seat_number = ?''',
-                          (status, name, email, booking_code, pay_method, member_id, expires_at, perf, s_num))
+                          (status, name, phone, password, booking_code, pay_method, member_id, expires_at, perf, s_num))
         conn.commit()
         conn.close()
         
@@ -1024,7 +1087,6 @@ def api_buy_reserved():
                 mode='payment',
                 success_url=f'{host_url}/api/stripe_success?code={booking_code}',
                 cancel_url=f'{host_url}/',
-                customer_email=email,
             )
             return jsonify({'success': True, 'checkout_url': checkout_session.url})
         except Exception as e:
@@ -1038,18 +1100,12 @@ def stripe_success():
         c = conn.cursor()
         
         if DATABASE_URL:
-            c.execute('SELECT performance_time, seat_number, email, purchased_by, payment_method FROM seats WHERE booking_code = %s', (booking_code,))
+            c.execute('SELECT booking_code FROM seats WHERE booking_code = %s', (booking_code,))
         else:
-            c.execute('SELECT performance_time, seat_number, email, purchased_by, payment_method FROM seats WHERE booking_code = ?', (booking_code,))
+            c.execute('SELECT booking_code FROM seats WHERE booking_code = ?', (booking_code,))
         rows = c.fetchall()
         
         if rows:
-            perf = rows[0][0]
-            email = rows[0][2]
-            name = rows[0][3]
-            pay_method = rows[0][4]
-            seat_numbers = [r[1] for r in rows]
-            
             if DATABASE_URL:
                 c.execute('UPDATE seats SET status = %s WHERE booking_code = %s', ('sold', booking_code))
             else:
@@ -1057,14 +1113,43 @@ def stripe_success():
             conn.commit()
             conn.close()
             
-            seat_str = ", ".join(seat_numbers)
-            total_price = (TICKET_PRICE + FEE_CONFIG.get(pay_method, 0)) * len(seat_numbers)
-            send_confirmation_email(email, name, booking_code, perf, seat_str, total_price)
-            
             return redirect(url_for('index') + '?status=success&code=' + booking_code)
             
         conn.close()
     return redirect(url_for('index'))
+
+@app.route('/api/mypage', methods=['POST'])
+def api_mypage():
+    data = request.json
+    phone = data.get('phone', '').strip()
+    password = data.get('password', '').strip()
+    
+    if not phone or not password:
+        return jsonify({'success': False, 'message': '電話番号とパスワードを入力してください。'})
+        
+    conn = get_db_connection()
+    c = conn.cursor()
+    
+    if DATABASE_URL:
+        c.execute('SELECT performance_time, seat_number, status, payment_method, booking_code, purchased_by FROM seats WHERE phone = %s AND password = %s', (phone, password))
+    else:
+        c.execute('SELECT performance_time, seat_number, status, payment_method, booking_code, purchased_by FROM seats WHERE phone = ? AND password = ?', (phone, password))
+    rows = c.fetchall()
+    conn.close()
+    
+    tickets = []
+    name = ""
+    for r in rows:
+        name = r[5]
+        tickets.append({
+            'performance_time': r[0],
+            'seat_number': r[1],
+            'status': r[2],
+            'payment_method': r[3],
+            'booking_code': r[4]
+        })
+        
+    return jsonify({'success': True, 'name': name, 'tickets': tickets})
 
 if __name__ == '__main__':
     app.run(debug=True, port=5500)
