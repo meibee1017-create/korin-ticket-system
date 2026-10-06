@@ -47,6 +47,9 @@ SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 SMTP_EMAIL = os.environ.get("SMTP_EMAIL", "project0106korin@gmail.com")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "tvrs ksrb dwbh dcio")
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+SENDER_EMAIL = os.environ.get("SENDER_EMAIL", "onboarding@resend.dev")
+ADMIN_EMAIL = "project0106korin@gmail.com"
 
 TICKET_PRICE = 1000 
 FEE_CONFIG = {
@@ -76,7 +79,8 @@ def is_reserved_seat(row, num):
     return (row in reserved_rows) and (5 <= num <= 16)
 
 def send_confirmation_email(to_email, name, booking_code, perf_time, seat_str, total_price):
-    if not SMTP_EMAIL:
+    if not RESEND_API_KEY:
+        print("Resend APIキーが設定されていません。")
         return
     
     perf_name = "昼公演 (14:30開演)" if perf_time == 'day' else "夜公演 (18:00開演)"
@@ -101,23 +105,28 @@ def send_confirmation_email(to_email, name, booking_code, perf_time, seat_str, t
 
 ----------------------------------------
 虹凛プロジェクト 制作部
-メール: {SMTP_EMAIL}
+メール: {ADMIN_EMAIL}
 """
 
-    msg = MIMEMultipart()
-    msg['From'] = SMTP_EMAIL
-    msg['To'] = to_email
-    msg['Subject'] = subject
-    msg.attach(MIMEText(body, 'plain', 'utf-8'))
+    url = "https://api.resend.com/emails"
+    headers = {
+        "Authorization": f"Bearer {RESEND_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "from": SENDER_EMAIL,
+        "to": [to_email],
+        "reply_to": ADMIN_EMAIL,
+        "subject": subject,
+        "text": body
+    }
 
     try:
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=5)
-        server.starttls()
-        server.login(SMTP_EMAIL, SMTP_PASSWORD)
-        server.send_message(msg)
-        server.quit()
+        req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers=headers, method='POST')
+        with urllib.request.urlopen(req) as response:
+            print(f"メール送信成功: {response.status}")
     except Exception as e:
-        print(f"メール送信エラー (スキップ継続): {e}")
+        print(f"メール送信エラー: {e}")
 
 # ---------------------------------------------------------
 # データベース初期化
@@ -942,7 +951,6 @@ def api_buy_reserved():
         if not seat_numbers:
             return jsonify({'success': False, 'message': '指定席が選択されていません。'})
             
-        # 選択された指定席が空いているか確認
         for s_num in seat_numbers:
             if DATABASE_URL:
                 c.execute('SELECT status FROM seats WHERE performance_time = %s AND seat_number = %s', (perf, s_num))
@@ -954,7 +962,6 @@ def api_buy_reserved():
                 return jsonify({'success': False, 'message': f'座席 {s_num} はすでに埋まっています。'})
         target_seats = seat_numbers
     else:
-        # 自由席の場合：指定された枚数分だけ、空いている自由席を自動で確保する
         qty = int(data.get('qty', 1))
         if DATABASE_URL:
             c.execute('SELECT seat_number FROM seats WHERE performance_time = %s AND seat_type = %s AND status = %s LIMIT %s', (perf, 'unreserved', 'available', qty))
@@ -971,7 +978,6 @@ def api_buy_reserved():
     booking_code = generate_booking_code()
     
     if pay_method == 'member':
-        # 身内販売は即確定
         status = 'sold'
         expires_at = None
         for s_num in target_seats:
@@ -986,17 +992,15 @@ def api_buy_reserved():
         conn.commit()
         conn.close()
         
-        # メール送信（安全に保護）
         try:
             seat_str = ", ".join(target_seats)
             total_price = (TICKET_PRICE * len(target_seats))
             send_confirmation_email(email, name, booking_code, perf, seat_str, total_price)
         except Exception as e:
-            print(f"メール送信例外パス: {e}")
+            print(f"メール送信例外: {e}")
         
         return jsonify({'success': True, 'booking_code': booking_code})
     else:
-        # 決済方法に応じた支払期限の設定（カードは15分、コンビニは3日間）
         status = 'pending_payment'
         if pay_method == 'convenience':
             expires_at = (datetime.now() + timedelta(days=3)).strftime('%Y-%m-%d %H:%M:%S')
@@ -1015,12 +1019,9 @@ def api_buy_reserved():
         conn.commit()
         conn.close()
         
-        # Stripe Checkoutセッション作成
         try:
             qty = len(target_seats)
             unit_price = TICKET_PRICE + FEE_CONFIG.get(pay_method, 0)
-            
-            # ホストURLの取得
             host_url = request.host_url.rstrip('/')
             
             checkout_session = stripe.checkout.Session.create(
@@ -1073,7 +1074,7 @@ def stripe_success():
             try:
                 send_confirmation_email(email, name, booking_code, perf, seat_str, total_price)
             except Exception as e:
-                print(f"メール送信例外パス: {e}")
+                print(f"メール送信例外: {e}")
             
             return redirect(url_for('index') + '?status=success&code=' + booking_code)
             
