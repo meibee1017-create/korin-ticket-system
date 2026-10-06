@@ -44,7 +44,8 @@ STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "pk_live_51UMcuZCoyCE0ABRGMHV0
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "whsec_ecbizSk8A82Ef7p7lC9ponR6OEjeWrJ7")
 stripe.api_key = STRIPE_API_KEY
 # 一時的に直接URLを書き込む場合（[パスワード]をご自身のものに変更してください）
-DATABASE_URL = "postgresql://postgres:[パスワード]@db.gyttdpplurbmntutdysy.supabase.co:5432/postgres"
+DATABASE_URL = os.environ.get("DATABASE_URL")
+DATABASE_URL = "postgresql://postgres:[Meikun0519]@db.gyttdpplurbmntutdysy.supabase.co:5432/postgres"
 
 TICKET_PRICE = 1000 
 FEE_CONFIG = {
