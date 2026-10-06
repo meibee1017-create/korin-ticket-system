@@ -45,8 +45,22 @@ STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "whsec_ecbizSk8A
 stripe.api_key = STRIPE_API_KEY
 # 一時的に直接URLを書き込む場合（[パスワード]をご自身のものに変更してください）
 
-DATABASE_URL = "postgresql://postgres:[Meikun0519]@db.gyttdpplurbmntutdysy.supabase.co:5432/postgres"
-
+def get_db_connection():
+    if DATABASE_URL:
+        # URLをパースする代わりに、個別の要素として安全に渡す
+        url = urllib.parse.urlparse(DATABASE_URL)
+        conn = psycopg2.connect(
+            dbname=url.path.lstrip('/'),
+            user=url.username,
+            password=url.password,
+            host=url.hostname,
+            port=url.port or 5432
+        )
+        return conn
+    else:
+        # ローカルテスト用 SQLite
+        conn = sqlite3.connect("seats.db")
+        return conn
 TICKET_PRICE = 1000 
 FEE_CONFIG = {
     'stripe': 100,      
