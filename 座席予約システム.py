@@ -68,9 +68,23 @@ def is_katakana(text):
     pattern = re.compile(r'^[\u30A1-\u30FC\s]+$')
     return bool(pattern.match(text))
 
+def normalize_phone(text):
+    """全角を半角にし、ハイフンやスペースをすべて削除して数字のみにする"""
+    if not text:
+        return ""
+    # 全角英数字・記号を半角に変換
+    translator = str.maketrans(
+        ''.join(chr(i) for i in range(0xFF01, 0xFF5F)),
+        ''.join(chr(i) for i in range(0x21, 0x7F))
+    )
+    normalized = text.translate(translator)
+    # ハイフン (-) とスペース類をすべて削除
+    normalized = re.sub(r'[\s\-ー―]', '', normalized)
+    return normalized.strip()
+
 def is_phone_number(text):
-    # ハイフンあり・なしの簡易的な電話番号チェック
-    pattern = re.compile(r'^\d{10,11}$|^\d{2,4}-\d{2,4}-\d{4}$')
+    # ハイフンなしの半角数字10〜11桁かチェック
+    pattern = re.compile(r'^\d{10,11}$')
     return bool(pattern.match(text))
 
 def is_reserved_seat(row, num):
@@ -263,7 +277,7 @@ HTML_BUY = """
         <div class="legend">
             <div class="legend-item"><div class="legend-box" style="background:#2980b9;"></div>指定席 (F5〜L16)</div>
             <div class="legend-item"><div class="legend-box" style="background:#95a5a6; opacity:0.6;"></div>自由席エリア</div>
-            <div class="legend-item"><div class="legend-box" style="background:#f39c12;"></div>選択中 / 決済手続き中</div>
+            <div class="legend-item"><div class="legend-box" style="background:#f39c12;"></div>選択中 / 仮抑え中</div>
             <div class="legend-item"><div class="legend-box" style="background:#e74c3c;"></div>予約済 / 予約不可</div>
         </div>
 
@@ -284,11 +298,11 @@ HTML_BUY = """
                     <input type="text" id="userNameReserved" placeholder="ヤマダ タロウ">
                 </div>
                 <div class="form-group">
-                    <label>電話番号（ハイフンなし または あり）</label>
+                    <label>電話番号（半角数字・ハイフンなし）</label>
                     <input type="text" id="userPhoneReserved" placeholder="09012345678">
                 </div>
                 <div class="form-group">
-                    <label>マイページ用パスワード（英数字4〜8桁など）</label>
+                    <label>マイページ用パスワード</label>
                     <input type="password" id="userPasswordReserved" placeholder="任意のパスワードを設定">
                 </div>
                 <div class="form-group">
@@ -324,7 +338,7 @@ HTML_BUY = """
                     <input type="text" id="userNameUnreserved" placeholder="ヤマダ タロウ">
                 </div>
                 <div class="form-group">
-                    <label>電話番号（ハイフンなし または あり）</label>
+                    <label>電話番号（半角数字・ハイフンなし）</label>
                     <input type="text" id="userPhoneUnreserved" placeholder="09012345678">
                 </div>
                 <div class="form-group">
@@ -354,7 +368,7 @@ HTML_BUY = """
             <h3 style="margin-top:0; text-align:center;">マイページ（予約確認）</h3>
             <p style="font-size: 12px; color: #666; text-align: center;">ご購入時に登録した電話番号とパスワードを入力してください。</p>
             <div class="form-group">
-                <label>電話番号</label>
+                <label>電話番号（ハイフンなし）</label>
                 <input type="text" id="loginPhone" placeholder="09012345678">
             </div>
             <div class="form-group">
@@ -443,11 +457,11 @@ HTML_BUY = """
                 </tr>
                 <tr>
                     <th>お支払い時期</th>
-                    <td>・クレジットカード：即時決済（15分以内に完了しない場合は自動キャンセル）<br>・コンビニ決済：ご注文完了後3日以内に店頭にてお支払いください。</td>
+                    <td>・クレジットカード：即時決済（15分以内に完了しない場合は仮抑えが自動解除されます）<br>・コンビニ決済：ご注文完了後3日以内（72時間）に店頭にてお支払いください。期限を過ぎると自動キャンセルとなります。</td>
                 </tr>
                 <tr>
                     <th>引き渡し時期</th>
-                    <td>決済完了後、マイページにて予約コードを即時発行いたします。（当日は受付にて予約コードをご提示いただくことでご入場いただけます）</td>
+                    <td>決済完了後（カード即時またはコンビニ入金確認後）、マイページにて予約コードを即時発行いたします。（当日は受付にて予約コードをご提示いただくことでご入場いただけます）</td>
                 </tr>
                 <tr>
                     <th>キャンセル・返品（返金）について</th>
@@ -483,7 +497,6 @@ HTML_BUY = """
             const status = params.get('status');
             const code = params.get('code');
             if (status === 'success' && code) {
-                // Stripe決済完了後の戻り
                 switchMainTab('mypage');
                 showSuccessModal(code);
                 window.history.replaceState({}, document.title, window.location.pathname);
@@ -790,7 +803,27 @@ HTML_BUY = """
                     data.tickets.forEach(t => {
                         const perfText = t.performance_time === 'day' ? '昼公演 (14:30開演)' : '夜公演 (18:00開演)';
                         const payText = PAY_NAMES[t.payment_method] || t.payment_method;
-                        const statusBadge = t.status === 'sold' ? '<span style="color:green; font-weight:bold;">購入完了</span>' : '<span style="color:orange; font-weight:bold;">決済手続き中・期限あり</span>';
+                        
+                        let statusBadge = '';
+                        let codeSection = '';
+
+                        if (t.status === 'sold') {
+                            statusBadge = '<span style="color:green; font-weight:bold;">購入・入金完了</span>';
+                            codeSection = `
+                                <div style="text-align:center; margin-top:8px;">
+                                    <div style="font-size:11px; color:#555;">予約コード（受付で提示）</div>
+                                    <div style="font-size:20px; font-weight:bold; color:#e74c3c; letter-spacing:2px;">${t.booking_code}</div>
+                                </div>
+                            `;
+                        } else {
+                            statusBadge = '<span style="color:orange; font-weight:bold;">仮抑え中（お支払い待ち）</span>';
+                            codeSection = `
+                                <div style="text-align:center; margin-top:8px; background:#fff3cd; padding:8px; border-radius:4px;">
+                                    <div style="font-size:12px; color:#856404; font-weight:bold;">お支払い完了後にコードが発行されます</div>
+                                    <div style="font-size:11px; color:#666; margin-top:2px;">カード決済またはコンビニ入金が完了すると、こちらに予約コードが表示されます。</div>
+                                </div>
+                            `;
+                        }
 
                         html += `
                             <div class="ticket-card">
@@ -798,10 +831,7 @@ HTML_BUY = """
                                 <b>座席番号:</b> <span style="color:#d35400; font-weight:bold;">${t.seat_number}</span><br>
                                 <b>ステータス:</b> ${statusBadge}<br>
                                 <b>支払い方法:</b> ${payText}<br>
-                                <div style="text-align:center; margin-top:8px;">
-                                    <div style="font-size:11px; color:#555;">予約コード（受付で提示）</div>
-                                    <div style="font-size:20px; font-weight:bold; color:#e74c3c; letter-spacing:2px;">${t.booking_code}</div>
-                                </div>
+                                ${codeSection}
                             </div>
                         `;
                     });
@@ -869,7 +899,7 @@ HTML_ADMIN = """
                 <th>決済方法</th>
                 <th>団員ID</th>
                 <th>予約コード</th>
-                <th>支払期限</th>
+                <th>支払期限（仮抑え期限）</th>
             </tr>
         </thead>
         <tbody id="tableBody"></tbody>
@@ -892,12 +922,12 @@ HTML_ADMIN = """
                 
                 let statusStr = '空席';
                 if (s.status === 'sold') {
-                    statusStr = '<span style="color:red;font-weight:bold;">予約済み / 売り止め</span>';
+                    statusStr = '<span style="color:green;font-weight:bold;">購入・入金完了</span>';
                 } else if (s.status === 'pending_payment') {
-                    statusStr = '<span style="color:orange;font-weight:bold;">決済手続き中</span>';
+                    statusStr = '<span style="color:orange;font-weight:bold;">仮抑え中</span>';
                 }
 
-                const codeStr = s.booking_code ? `<span class="code-tag">${s.booking_code}</span>` : '-';
+                const codeStr = (s.status === 'sold' && s.booking_code) ? `<span class="code-tag">${s.booking_code}</span>` : '-';
                 const payStr = s.payment_method ? `<span class="pay-tag">${payLabels[s.payment_method] || s.payment_method}</span>` : '-';
                 const memberStr = s.member_id ? `<b>${s.member_id}</b>` : '-';
                 const expiresStr = s.expires_at ? s.expires_at : '-';
@@ -980,8 +1010,10 @@ def api_buy_reserved():
     data = request.json
     perf = data.get('performance_time')
     name = data.get('name')
-    phone = data.get('phone')
-    password = data.get('password')
+    
+    # 電話番号からハイフン等を完全排除してハイフンなしの半角数字に統一
+    phone = normalize_phone(data.get('phone', ''))
+    password = data.get('password', '').strip()
     pay_method = data.get('payMethod')
     member_id = data.get('memberId', '')
     mode = data.get('mode', 'reserved')
@@ -993,7 +1025,7 @@ def api_buy_reserved():
         return jsonify({'success': False, 'message': 'お名前は全角カタカナで入力してください。'})
         
     if not is_phone_number(phone):
-        return jsonify({'success': False, 'message': '電話番号の形式が正しくありません。'})
+        return jsonify({'success': False, 'message': '電話番号はハイフンなしの半角数字10〜11桁で正しく入力してください（例: 09012345678）。'})
         
     if pay_method == 'member' and member_id not in VALID_MEMBER_IDS:
         return jsonify({'success': False, 'message': '団員IDが無効です。'})
@@ -1051,6 +1083,7 @@ def api_buy_reserved():
         
         return jsonify({'success': True, 'booking_code': booking_code})
     else:
+        # クレジットカードは15分、コンビニ決済は3日間（72時間）仮抑え
         status = 'pending_payment'
         if pay_method == 'convenience':
             expires_at = (datetime.now() + timedelta(days=3)).strftime('%Y-%m-%d %H:%M:%S')
@@ -1074,8 +1107,10 @@ def api_buy_reserved():
             unit_price = TICKET_PRICE + FEE_CONFIG.get(pay_method, 0)
             
             host_url = request.host_url.rstrip('/')
+            payment_method_types = ['card'] if pay_method == 'stripe' else ['konbini']
             
             checkout_session = stripe.checkout.Session.create(
+                payment_method_types=payment_method_types,
                 line_items=[{
                     'price_data': {
                         'currency': 'jpy',
@@ -1100,28 +1135,51 @@ def stripe_success():
         c = conn.cursor()
         
         if DATABASE_URL:
-            c.execute('SELECT booking_code FROM seats WHERE booking_code = %s', (booking_code,))
+            c.execute('SELECT booking_code, payment_method FROM seats WHERE booking_code = %s', (booking_code,))
         else:
-            c.execute('SELECT booking_code FROM seats WHERE booking_code = ?', (booking_code,))
-        rows = c.fetchall()
+            c.execute('SELECT booking_code, payment_method FROM seats WHERE booking_code = ?', (booking_code,))
+        row = c.fetchone()
         
-        if rows:
-            if DATABASE_URL:
-                c.execute('UPDATE seats SET status = %s WHERE booking_code = %s', ('sold', booking_code))
-            else:
-                c.execute('UPDATE seats SET status = ? WHERE booking_code = ?', ('sold', booking_code))
-            conn.commit()
-            conn.close()
+        if row:
+            pay_method = row[1]
+            if pay_method == 'stripe':
+                if DATABASE_URL:
+                    c.execute('UPDATE seats SET status = %s WHERE booking_code = %s', ('sold', booking_code))
+                else:
+                    c.execute('UPDATE seats SET status = ? WHERE booking_code = ?', ('sold', booking_code))
+                conn.commit()
             
+            conn.close()
             return redirect(url_for('index') + '?status=success&code=' + booking_code)
             
         conn.close()
     return redirect(url_for('index'))
 
+@app.route('/api/webhook', methods=['POST'])
+def stripe_webhook():
+    payload = request.get_data(as_text=True)
+    sig_header = request.headers.get('Stripe-Signature')
+    event = None
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, STRIPE_WEBHOOK_SECRET
+        )
+    except ValueError:
+        return 'Invalid payload', 400
+    except stripe.error.SignatureVerificationError:
+        return 'Invalid signature', 400
+
+    if event['type'] == 'checkout.session.completed':
+        session = event['data']['object']
+        
+    return jsonify({'status': 'success'}), 200
+
 @app.route('/api/mypage', methods=['POST'])
 def api_mypage():
     data = request.json
-    phone = data.get('phone', '').strip()
+    # マイページログイン時も入力された電話番号からハイフン等を排除して検索
+    phone = normalize_phone(data.get('phone', ''))
     password = data.get('password', '').strip()
     
     if not phone or not password:
@@ -1133,7 +1191,7 @@ def api_mypage():
     if DATABASE_URL:
         c.execute('SELECT performance_time, seat_number, status, payment_method, booking_code, purchased_by FROM seats WHERE phone = %s AND password = %s', (phone, password))
     else:
-        c.execute('SELECT performance_time, seat_number, status, payment_method, booking_code, purchased_by FROM seats WHERE phone = ? AND password = ?', (phone, password))
+        c.execute('SELECT performance_time, seat_number, status, payment_method, booking_code, password, purchased_by FROM seats WHERE phone = ? AND password = ?', (phone, password))
     rows = c.fetchall()
     conn.close()
     
