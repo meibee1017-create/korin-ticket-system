@@ -970,7 +970,7 @@ def api_buy_reserved():
             
     booking_code = generate_booking_code()
     
-    if pay_method == 'member':
+if pay_method == 'member':
         # 身内販売は即確定
         status = 'sold'
         expires_at = None
@@ -986,10 +986,13 @@ def api_buy_reserved():
         conn.commit()
         conn.close()
         
-        # メール送信
-        seat_str = ", ".join(target_seats)
-        total_price = (TICKET_PRICE * len(target_seats))
-        send_confirmation_email(email, name, booking_code, perf, seat_str, total_price)
+        # メール送信（エラーが起きてもアプリが落ちないように安全に処理）
+        try:
+            seat_str = ", ".join(target_seats)
+            total_price = (TICKET_PRICE * len(target_seats))
+            send_confirmation_email(email, name, booking_code, perf, seat_str, total_price)
+        except Exception as e:
+            print(f"メール送信スキップ: {e}")
         
         return jsonify({'success': True, 'booking_code': booking_code})
     else:
