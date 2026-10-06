@@ -656,7 +656,16 @@ HTML_BUY = """
             if (!email) return alert('メールアドレスを入力してください');
             if (payMethod === 'member' && !memberId) return alert('身内販売の場合は団員IDを入力してください');
 
-            pendingPurchaseData = { performance_time: currentPerformance, mode: currentMode, name, email, payMethod, memberId, qty, seat_numbers: selectedSeats };
+            pendingPurchaseData = { 
+                performance_time: currentPerformance, 
+                mode: currentMode, 
+                name, 
+                email, 
+                payMethod, 
+                memberId, 
+                qty, 
+                seat_numbers: selectedSeats 
+            };
 
             const ticketPriceSum = TICKET_PRICE * qty;
             const feeUnit = FEE_CONFIG[payMethod] || 0;
@@ -706,7 +715,6 @@ HTML_BUY = """
         async function executePurchase() {
             if (!pendingPurchaseData) return;
 
-            // 自由席も指定席も同じ /api/buy_reserved エンドポイントに統一！
             const res = await fetch('/api/buy_reserved', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -1068,4 +1076,3 @@ def stripe_success():
 
 if __name__ == '__main__':
     app.run(debug=True, port=5500)
-#いじるなよ
