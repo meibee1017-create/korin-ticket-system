@@ -18,25 +18,21 @@ app = Flask(__name__)
 # ---------------------------------------------------------
 # データベース接続設定 (PostgreSQL対応)
 # ---------------------------------------------------------
-DATABASE_URL = os.environ.get("DATABASE_URL")
 
 def get_db_connection():
     if DATABASE_URL:
-        # PostgreSQL (Renderの本番環境)
-        url = urllib.parse.urlparse(DATABASE_URL)
+        # 直接値を指定する場合の安全な接続方法
         conn = psycopg2.connect(
-            database=url.path[1:],
-            user=url.username,
-            password=url.password,
-            host=url.hostname,
-            port=url.port
+            dbname="postgres",
+            user="postgres",
+            password="あなたのパスワード",
+            host="db.gyttdpplurbmntutdysy.supabase.co",
+            port=5432
         )
         return conn
     else:
-        # ローカルテスト用 SQLite
         conn = sqlite3.connect("seats.db")
         return conn
-
 # ---------------------------------------------------------
 # APIキー・認証設定
 # ---------------------------------------------------------
@@ -45,22 +41,7 @@ STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "whsec_ecbizSk8A
 stripe.api_key = STRIPE_API_KEY
 # 一時的に直接URLを書き込む場合（[パスワード]をご自身のものに変更してください）
 
-def get_db_connection():
-    if DATABASE_URL:
-        # URLをパースする代わりに、個別の要素として安全に渡す
-        url = urllib.parse.urlparse(DATABASE_URL)
-        conn = psycopg2.connect(
-            dbname=url.path.lstrip('/'),
-            user=url.username,
-            password=url.password,
-            host=url.hostname,
-            port=url.port or 5432
-        )
-        return conn
-    else:
-        # ローカルテスト用 SQLite
-        conn = sqlite3.connect("seats.db")
-        return conn
+
 TICKET_PRICE = 1000 
 FEE_CONFIG = {
     'stripe': 100,      
