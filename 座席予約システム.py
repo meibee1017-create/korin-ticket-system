@@ -111,13 +111,13 @@ def send_confirmation_email(to_email, name, booking_code, perf_time, seat_str, t
     msg.attach(MIMEText(body, 'plain', 'utf-8'))
 
     try:
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=5)
         server.starttls()
         server.login(SMTP_EMAIL, SMTP_PASSWORD)
         server.send_message(msg)
         server.quit()
     except Exception as e:
-        print(f"メール送信エラー: {e}")
+        print(f"メール送信エラー (スキップ継続): {e}")
 
 # ---------------------------------------------------------
 # データベース初期化
@@ -970,7 +970,7 @@ def api_buy_reserved():
             
     booking_code = generate_booking_code()
     
-if pay_method == 'member':
+    if pay_method == 'member':
         # 身内販売は即確定
         status = 'sold'
         expires_at = None
@@ -986,13 +986,13 @@ if pay_method == 'member':
         conn.commit()
         conn.close()
         
-        # メール送信（エラーが起きてもアプリが落ちないように安全に処理）
+        # メール送信（安全に保護）
         try:
             seat_str = ", ".join(target_seats)
             total_price = (TICKET_PRICE * len(target_seats))
             send_confirmation_email(email, name, booking_code, perf, seat_str, total_price)
         except Exception as e:
-            print(f"メール送信スキップ: {e}")
+            print(f"メール送信例外パス: {e}")
         
         return jsonify({'success': True, 'booking_code': booking_code})
     else:
@@ -1070,7 +1070,10 @@ def stripe_success():
             
             seat_str = ", ".join(seat_numbers)
             total_price = (TICKET_PRICE + FEE_CONFIG.get(pay_method, 0)) * len(seat_numbers)
-            send_confirmation_email(email, name, booking_code, perf, seat_str, total_price)
+            try:
+                send_confirmation_email(email, name, booking_code, perf, seat_str, total_price)
+            except Exception as e:
+                print(f"メール送信例外パス: {e}")
             
             return redirect(url_for('index') + '?status=success&code=' + booking_code)
             
